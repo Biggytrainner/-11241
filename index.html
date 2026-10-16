@@ -367,20 +367,6 @@ tbody tr:hover td{background:rgba(255,255,255,.55)}
 
 
 
-<div id="authGate" style="position:fixed;inset:0;z-index:20000;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(145deg,#EAF6EE,#D5ECDD);font-family:'Noto Sans Thai',sans-serif">
-  <form id="authForm" style="width:min(420px,100%);padding:28px;border-radius:20px;background:rgba(255,255,255,.88);box-shadow:0 18px 55px rgba(13,59,26,.18);border:1px solid white">
-    <h2 style="color:#1F5F40;margin-bottom:8px">คลังอุปกรณ์ทางกายภาพบำบัด</h2>
-    <p style="color:#2F855A;font-size:13px;margin-bottom:20px">เข้าสู่ระบบเพื่อใช้ฐานข้อมูลกลาง</p>
-    <label for="authEmail" style="display:block;font-size:12px;margin:10px 0 5px">อีเมลเจ้าหน้าที่</label>
-    <input id="authEmail" type="email" required autocomplete="username" style="width:100%;padding:12px;border:1px solid #C9DFCA;border-radius:9px" />
-    <label for="authPassword" style="display:block;font-size:12px;margin:12px 0 5px">รหัสผ่าน</label>
-    <input id="authPassword" type="password" required autocomplete="current-password" style="width:100%;padding:12px;border:1px solid #C9DFCA;border-radius:9px" />
-    <button id="authSubmit" type="submit" style="margin-top:18px;width:100%;padding:12px;border:0;border-radius:9px;background:#2F855A;color:white;font-weight:700;cursor:pointer">เข้าสู่ระบบ</button>
-    <p id="authMessage" style="font-size:12px;color:#B42318;margin-top:12px;white-space:pre-wrap"></p>
-    <p style="font-size:11px;color:#53715D;margin-top:12px">ต้องตั้งค่า Supabase URL และ anon key ในไฟล์ <code>config.js</code> ก่อนใช้งาน</p>
-  </form>
-</div>
-
 <div class="header">
   <div class="header-left">
     <div style="width:52px;height:52px;background:linear-gradient(135deg,#2F855A,#4CAF50);border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -397,8 +383,7 @@ tbody tr:hover td{background:rgba(255,255,255,.55)}
       <div style="font-size:10px;color:#4CAF50;margin-top:1px">โรงพยาบาลท่าสองยาง · Thasongyang Hospital</div>
     </div>
   </div>
-  <div class="header-btns"><span id="cloudStatus" style="font-size:11px;color:#2F855A;align-self:center">ฐานข้อมูลกลาง</span><button class="btn btn-outline" onclick="cloudSignOut()">ออกจากระบบ</button>
-    <button class="btn btn-primary" onclick="openBorrow()">+ บันทึกการยืม</button>
+  <div class="header-btns"><span id="cloudStatus" style="font-size:11px;color:#2F855A;align-self:center">ฐานข้อมูลกลาง</span><button class="btn btn-primary" onclick="openBorrow()">+ บันทึกการยืม</button>
     <button class="btn btn-outline" onclick="openAdjust()">ปรับสต๊อก</button>
     <button class="btn btn-outline" onclick="switchTab(&#39;eq&#39;)">จัดการอุปกรณ์</button>
     <button class="btn btn-outline" onclick="exportData()">Export JSON</button>
@@ -1295,77 +1280,44 @@ function syncGS(action,data){
 }
 
 
-async function cloudSignOut(){
-  if (window.sbClient) await window.sbClient.auth.signOut();
-  location.reload();
-}
 async function startApp(){
-  const gate = document.getElementById("authGate");
-  const form = document.getElementById("authForm");
-  const msg = document.getElementById("authMessage");
+  const status = document.getElementById("cloudStatus");
   if (!window.SUPABASE_CONFIG || !SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey ||
       SUPABASE_CONFIG.url.includes("YOUR_PROJECT") || SUPABASE_CONFIG.anonKey.includes("YOUR_SUPABASE")) {
-    msg.textContent = "ยังไม่ได้ตั้งค่า config.js — กรุณาทำตาม README.md";
+    if (status) status.textContent = "โหมดในเครื่อง — ยังไม่ได้ตั้งค่าฐานข้อมูลกลาง";
+    renderAll();
     return;
   }
-  window.sbClient = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
-  form.addEventListener("submit", async (ev) => {
-    ev.preventDefault();
-    const btn = document.getElementById("authSubmit");
-    btn.disabled = true; btn.textContent = "กำลังเข้าสู่ระบบ...";
-    msg.textContent = "";
-    const { error } = await window.sbClient.auth.signInWithPassword({
-      email: document.getElementById("authEmail").value.trim(),
-      password: document.getElementById("authPassword").value
-    });
-    if (error) msg.textContent = "เข้าสู่ระบบไม่สำเร็จ: " + error.message;
-    btn.disabled = false; btn.textContent = "เข้าสู่ระบบ";
-  });
-  window.sbClient.auth.onAuthStateChange((_event, session) => {
-    // Run database requests outside the auth callback to avoid holding the auth lock.
-    setTimeout(() => handleAuthSession(session), 0);
-  });
-}
-async function handleAuthSession(session) {
-    const gate = document.getElementById("authGate");
-    const msg = document.getElementById("authMessage");
-    if (!session) {
-      cloudReady = false;
-      gate.style.display = "flex";
-      return;
-    }
-    msg.textContent = "";
-    document.getElementById("authSubmit").textContent = "เข้าสู่ระบบ";
-    try {
-      const { data, error } = await window.sbClient.from("app_state").select("payload").eq("id","main").maybeSingle();
-      if (error) throw error;
-      if (data && data.payload) {
-        const p = data.payload;
-        if (Array.isArray(p.eqs) && p.stk && Array.isArray(p.recs)) {
-          eqs = p.eqs; stk = p.stk; recs = p.recs;
-          customLenders = Array.isArray(p.lenders) ? p.lenders : [];
-          localStorage.setItem("eq2_eq", JSON.stringify(eqs));
-          localStorage.setItem("eq2_stk", JSON.stringify(stk));
-          localStorage.setItem("eq2_rec", JSON.stringify(recs));
-          localStorage.setItem("eq2_lenders", JSON.stringify(customLenders));
-        }
-      } else {
-        // First authorized user seeds the shared database from the app's starter data.
-        const payload = { eqs, stk, recs, lenders: customLenders, updated_at: new Date().toISOString() };
-        const { error: seedError } = await window.sbClient.from("app_state").upsert({id:"main", payload}, {onConflict:"id"});
-        if (seedError) throw seedError;
+  try {
+    window.sbClient = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
+    const { data, error } = await window.sbClient.from("app_state").select("payload").eq("id","main").maybeSingle();
+    if (error) throw error;
+    if (data && data.payload) {
+      const p = data.payload;
+      if (Array.isArray(p.eqs) && p.stk && Array.isArray(p.recs)) {
+        eqs = p.eqs; stk = p.stk; recs = p.recs;
+        customLenders = Array.isArray(p.lenders) ? p.lenders : [];
+        localStorage.setItem("eq2_eq", JSON.stringify(eqs));
+        localStorage.setItem("eq2_stk", JSON.stringify(stk));
+        localStorage.setItem("eq2_rec", JSON.stringify(recs));
+        localStorage.setItem("eq2_lenders", JSON.stringify(customLenders));
       }
-      cloudReady = true;
-      gate.style.display = "none";
-      const status = document.getElementById("cloudStatus");
-      if (status) status.textContent = "เชื่อมต่อฐานข้อมูลกลาง";
-      renderAll();
-    } catch (err) {
-      cloudReady = false;
-      gate.style.display = "flex";
-      msg.textContent = "เชื่อมต่อฐานข้อมูลไม่ได้: " + err.message + "\\nตรวจ SQL/RLS และ config.js";
+    } else {
+      // Seed the shared database with the starter data when it is empty.
+      const payload = { eqs, stk, recs, lenders: customLenders, updated_at: new Date().toISOString() };
+      const { error: seedError } = await window.sbClient.from("app_state").upsert({id:"main", payload}, {onConflict:"id"});
+      if (seedError) throw seedError;
     }
+    cloudReady = true;
+    if (status) status.textContent = "เชื่อมต่อฐานข้อมูลกลางแล้ว";
+  } catch (err) {
+    cloudReady = false;
+    if (status) status.textContent = "เชื่อมต่อฐานข้อมูลไม่ได้ — ใช้ข้อมูลในเครื่อง";
+    console.error("Cloud database connection failed:", err);
+  }
+  renderAll();
 }
+
 startApp();
 
 </script>
