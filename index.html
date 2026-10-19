@@ -361,9 +361,27 @@ tbody tr:hover td{background:rgba(255,255,255,.55)}
   .prog-fill,.eq-icon-box{transition:none}
 }
 /* ===== /Glass motion ===== */
+
+/* sync chip */
+.sync-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;font:inherit;font-size:12.5px;font-weight:600;color:#1F5F40;cursor:pointer;
+  background:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.75);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 2px 8px rgba(31,95,64,.10);transition:background .3s ease,transform .3s var(--ease)}
+.sync-chip:hover{background:rgba(255,255,255,.75)}
+.sync-chip:active{transform:scale(.96)}
+.sync-dot{width:9px;height:9px;border-radius:50%;background:#2F855A;box-shadow:0 0 0 3px rgba(47,133,90,.18);transition:background .3s ease,box-shadow .3s ease}
+.sync-chip[data-state="sync"] .sync-dot{background:#ED8936;box-shadow:0 0 0 3px rgba(237,137,54,.22);animation:gPulse 1.1s ease-in-out infinite}
+.sync-chip[data-state="offline"] .sync-dot{background:#E24B4A;box-shadow:0 0 0 3px rgba(226,75,74,.20)}
+.sync-chip[data-state="locked"] .sync-dot{background:#D69E2E;box-shadow:0 0 0 3px rgba(214,158,46,.22)}
+@keyframes gPulse{50%{transform:scale(1.35);opacity:.6}}
+@media (prefers-reduced-motion:reduce){.sync-chip[data-state="sync"] .sync-dot{animation:none}}
+
+.sync-banner{display:none;align-items:center;justify-content:space-between;gap:14px;margin:0 28px 14px;padding:11px 16px;border-radius:14px;font-size:13px;line-height:1.5;color:#7A4B00;
+  background:rgba(255,244,214,.62);border:1px solid rgba(214,158,46,.4);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 6px 20px rgba(214,158,46,.14),inset 0 1px 0 rgba(255,255,255,.7)}
+.sync-banner.show{display:flex;animation:gPane .35s var(--ease) both}
+.sync-banner .btn{flex:none;padding:6px 14px}
+@media (max-width:600px){.sync-banner{margin:0 16px 14px;flex-direction:column;align-items:stretch}}
 /* ===== /Glass design layer ===== */
 </style>
-
 
 
 
@@ -383,7 +401,9 @@ tbody tr:hover td{background:rgba(255,255,255,.55)}
       <div style="font-size:10px;color:#4CAF50;margin-top:1px">โรงพยาบาลท่าสองยาง · Thasongyang Hospital</div>
     </div>
   </div>
-  <div class="header-btns"><span id="cloudStatus" style="font-size:11px;color:#2F855A;align-self:center">ฐานข้อมูลกลาง</span><button class="btn btn-primary" onclick="openBorrow()">+ บันทึกการยืม</button>
+  <div class="header-btns">
+      <button class="sync-chip" id="syncChip" data-state="sync" onclick="pull(true)" title="กดเพื่อซิงก์ใหม่"><span class="sync-dot"></span><span id="syncTxt">กำลังเชื่อมต่อ…</span></button>
+    <button class="btn btn-primary" onclick="openBorrow()">+ บันทึกการยืม</button>
     <button class="btn btn-outline" onclick="openAdjust()">ปรับสต๊อก</button>
     <button class="btn btn-outline" onclick="switchTab(&#39;eq&#39;)">จัดการอุปกรณ์</button>
     <button class="btn btn-outline" onclick="exportData()">Export JSON</button>
@@ -417,6 +437,7 @@ tbody tr:hover td{background:rgba(255,255,255,.55)}
   </div>
 </div>
 
+<div class="sync-banner" id="syncBanner" role="alert"><span id="syncMsg"></span><button class="btn btn-outline" onclick="retrySync()">ลองใหม่</button></div>
 <div class="tabs">
   <button class="tab tab-on" id="t-dash" onclick="switchTab(&#39;dash&#39;)">ภาพรวม</button>
   <button class="tab tab-off" id="t-rec" onclick="switchTab(&#39;rec&#39;)">รายการยืม-คืน</button>
@@ -628,8 +649,6 @@ tbody tr:hover td{background:rgba(255,255,255,.55)}
 
 <div class="toast" id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="./config.js"></script>
 <script>
 const BASE_EQ = [
   {id:"bed",    name:"เตียงนอน",           icon:"bed",    color:"#2F855A"},
@@ -656,31 +675,13 @@ let pick={eqId:null,sel:[],exclude:null,max:0,box:"",info:""};
 
 let flt="all", retId=null, editId=null, delId=null, selColor=COLORS[0], selIcon=ICONS[0], bQty=1;
 
-let cloudSaveTimer = null;
-let cloudReady = false;
-function save(){
-  localStorage.setItem("eq2_eq", JSON.stringify(eqs));
+function cacheLocal(){
+  localStorage.setItem("eq2_eq",  JSON.stringify(eqs));
   localStorage.setItem("eq2_stk", JSON.stringify(stk));
   localStorage.setItem("eq2_rec", JSON.stringify(recs));
   localStorage.setItem("eq2_lenders", JSON.stringify(customLenders));
-  if (cloudReady && window.sbClient) {
-    clearTimeout(cloudSaveTimer);
-    cloudSaveTimer = setTimeout(async () => {
-      try {
-        const payload = { eqs, stk, recs, lenders: customLenders, updated_at: new Date().toISOString() };
-        const { error } = await window.sbClient.from("app_state").upsert({ id: "main", payload }, { onConflict: "id" });
-        if (error) throw error;
-        const badge = document.getElementById("cloudStatus");
-        if (badge) badge.textContent = "บันทึกฐานข้อมูลกลางแล้ว";
-      } catch (err) {
-        console.error("Cloud save failed", err);
-        const badge = document.getElementById("cloudStatus");
-        if (badge) badge.textContent = "บันทึกออนไลน์ไม่สำเร็จ — ตรวจการเชื่อมต่อ";
-        toast("บันทึกในเครื่องแล้ว แต่ซิงก์ฐานข้อมูลกลางไม่สำเร็จ", "err");
-      }
-    }, 450);
-  }
 }
+function save(){cacheLocal();queuePush();}
 function gEq(id){return eqs.find(e=>e.id===id);}
 function fmt(d){
   if(!d) return "-";
@@ -1279,47 +1280,93 @@ function syncGS(action,data){
     .catch(err=>console.warn("sync failed:",err));
 }
 
+/* ===== Central DB: Netlify Function (/api/data) -> Netlify Database ===== */
+const API_URL="/api/data", POLL_MS=20000;
+let remoteSha=localStorage.getItem("eq2_ver")||null;
+let dirty=localStorage.getItem("eq2_dirty")==="1";
+let pushing=false,pushTimer=null,lastSync=null;
 
-async function startApp(){
-  const status = document.getElementById("cloudStatus");
-  if (!window.SUPABASE_CONFIG || !SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey ||
-      SUPABASE_CONFIG.url.includes("YOUR_PROJECT") || SUPABASE_CONFIG.anonKey.includes("YOUR_SUPABASE")) {
-    if (status) status.textContent = "โหมดในเครื่อง — ยังไม่ได้ตั้งค่าฐานข้อมูลกลาง";
-    renderAll();
-    return;
-  }
-  try {
-    window.sbClient = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
-    const { data, error } = await window.sbClient.from("app_state").select("payload").eq("id","main").maybeSingle();
-    if (error) throw error;
-    if (data && data.payload) {
-      const p = data.payload;
-      if (Array.isArray(p.eqs) && p.stk && Array.isArray(p.recs)) {
-        eqs = p.eqs; stk = p.stk; recs = p.recs;
-        customLenders = Array.isArray(p.lenders) ? p.lenders : [];
-        localStorage.setItem("eq2_eq", JSON.stringify(eqs));
-        localStorage.setItem("eq2_stk", JSON.stringify(stk));
-        localStorage.setItem("eq2_rec", JSON.stringify(recs));
-        localStorage.setItem("eq2_lenders", JSON.stringify(customLenders));
-      }
-    } else {
-      // Seed the shared database with the starter data when it is empty.
-      const payload = { eqs, stk, recs, lenders: customLenders, updated_at: new Date().toISOString() };
-      const { error: seedError } = await window.sbClient.from("app_state").upsert({id:"main", payload}, {onConflict:"id"});
-      if (seedError) throw seedError;
-    }
-    cloudReady = true;
-    if (status) status.textContent = "เชื่อมต่อฐานข้อมูลกลางแล้ว";
-  } catch (err) {
-    cloudReady = false;
-    if (status) status.textContent = "เชื่อมต่อฐานข้อมูลไม่ได้ — ใช้ข้อมูลในเครื่อง";
-    console.error("Cloud database connection failed:", err);
-  }
-  renderAll();
+function snapshot(){return {eqs,stk,recs,lenders:customLenders};}
+function setSha(s){remoteSha=s||null;s?localStorage.setItem("eq2_ver",s):localStorage.removeItem("eq2_ver");}
+function setDirty(v){dirty=v;v?localStorage.setItem("eq2_dirty","1"):localStorage.removeItem("eq2_dirty");}
+function applySnapshot(d){
+  if(!d||!Array.isArray(d.eqs)||!d.stk||!Array.isArray(d.recs))return false;
+  eqs=d.eqs;stk=d.stk;recs=d.recs;customLenders=Array.isArray(d.lenders)?d.lenders:[];
+  eqs.forEach(e=>{if(stk[e.id]===undefined)stk[e.id]=0;});
+  cacheLocal();renderAll();return true;
 }
+function setSync(state,msg){
+  const chip=document.getElementById("syncChip"),txt=document.getElementById("syncTxt");
+  if(!chip)return;
+  if(state==="ok")lastSync=new Date();
+  chip.dataset.state=state;
+  txt.textContent={ok:"ซิงก์แล้ว",sync:"กำลังซิงก์…",offline:dirty?"ออฟไลน์ · รอส่งข้อมูล":"เชื่อมต่อไม่ได้"}[state]||"";
+  chip.title=(msg?msg+" · ":"")+(lastSync?"ซิงก์ล่าสุด "+lastSync.toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"}):"กดเพื่อซิงก์ใหม่");
+  const ban=document.getElementById("syncBanner");
+  if(state==="offline"){
+    ban.classList.add("show");
+    document.getElementById("syncMsg").textContent=(msg||"เชื่อมต่อเซิร์ฟเวอร์ไม่ได้")+(dirty?" — ข้อมูลที่แก้ไขเก็บไว้ในเครื่องแล้ว จะส่งให้อัตโนมัติเมื่อเชื่อมต่อได้":"");
+  }else if(state==="ok")ban.classList.remove("show");
+}
+async function api(method,body){
+  try{
+    const res=await fetch(API_URL,{method,cache:"no-store",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+    let json={};try{json=await res.json();}catch(_){}
+    return {status:res.status,json};
+  }catch(_){return {status:0,json:{}};}
+}
+function reasonOf(r){
+  const e=r.json.error,m=r.json.message||"";
+  if(r.status===0)return "ติดต่อเซิร์ฟเวอร์ไม่ได้ (เช็กอินเทอร์เน็ต — ถ้าเปิดไฟล์จากเครื่องจะไม่มี /api)";
+  if(e==="db_error")return "ฐานข้อมูลขัดข้องชั่วคราว ระบบจะลองใหม่อัตโนมัติ";
+  if(r.status===404)return "ไม่พบ /api/data — ฟังก์ชันยังไม่ถูก deploy";
+  return (e||("HTTP "+r.status))+(m?": "+m:"");
+}
+function retrySync(){dirty?push():pull(true);}
+const modalOpen=()=>!!document.querySelector(".overlay.show");
 
-startApp();
+async function pull(manual){
+  if(pushing||dirty)return;                      // ไม่ทับข้อมูลที่ยังไม่ได้ส่ง
+  if(!manual&&modalOpen())return;                // ไม่รีเฟรชกลางหน้าต่างกรอกข้อมูล
+  setSync("sync");
+  try{
+    const r=await api("GET");
+    if(r.status!==200)throw new Error(reasonOf(r));
+    if(r.json.data===null||r.json.data===undefined){setDirty(true);await push();return;}   // ยังไม่มีไฟล์: อัปโหลดข้อมูลเริ่มต้น
+    if(r.json.sha!==remoteSha){setSha(r.json.sha);applySnapshot(r.json.data);}
+    setSync("ok");
+  }catch(err){setSync("offline",err.message);}
+}
+function queuePush(){setDirty(true);setSync("sync");clearTimeout(pushTimer);pushTimer=setTimeout(push,600);}
+async function push(){
+  if(pushing||!dirty)return;
+  pushing=true;setDirty(false);let failed=false;
+  try{
+    const r=await api("PUT",{data:snapshot(),sha:remoteSha});
+    if(r.status===200){setSha(r.json.sha);setSync("ok");}
+    else if(r.status===409){
+      if(r.json.data){setSha(r.json.sha);applySnapshot(r.json.data);}
+      setDirty(false);setSync("ok");
+      toast("มีผู้อื่นบันทึกข้อมูลก่อนหน้า โหลดข้อมูลล่าสุดแล้ว กรุณาทำรายการซ้ำ","err");
+    }
+    else throw new Error(reasonOf(r));
+  }catch(err){setDirty(true);failed=true;setSync("offline",err.message);}
+  finally{
+    pushing=false;
+    if(dirty){clearTimeout(pushTimer);pushTimer=setTimeout(push,failed?15000:300);}
+  }
+}
+function initSync(){
+  setSync("sync");
+  dirty?push():pull(true);
+  setInterval(()=>pull(false),POLL_MS);
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)pull(false);});
+  window.addEventListener("online",()=>{dirty?push():pull(true);});
+  window.addEventListener("offline",()=>setSync("offline"));
+}
+/* ===== /Central DB ===== */
 
+renderAll();initSync();
 </script>
 
 </body></html>
